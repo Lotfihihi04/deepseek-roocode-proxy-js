@@ -660,6 +660,59 @@ class ProxyEndToEndTests(unittest.TestCase):
             PLACEHOLDER_REASONING_CONTENT,
         )
 
+    def test_reasoning_cache_endpoint_returns_stats(self) -> None:
+        from urllib.request import Request, urlopen
+
+        request = Request(
+            f"{self.proxy.url}/v1/reasoning-cache",
+            method="GET",
+            headers={
+                "Authorization": "Bearer sk-cursor-test",
+            },
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("cache", payload)
+        self.assertIn("diagnostic", payload)
+        self.assertEqual(payload["cache"]["total_rows"], 0)
+        self.assertIn("cache_location", payload["diagnostic"])
+
+    def test_reasoning_cache_endpoint_on_root_path(self) -> None:
+        from urllib.request import Request, urlopen
+
+        request = Request(
+            f"{self.proxy.url}/reasoning-cache",
+            method="GET",
+            headers={
+                "Authorization": "Bearer sk-cursor-test",
+            },
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("cache", payload)
+        self.assertIn("diagnostic", payload)
+
+    def test_reasoning_cache_endpoint_includes_stored_data(self) -> None:
+        from urllib.request import Request, urlopen
+
+        self.store.put("test_key", "test_reasoning", {"role": "assistant"})
+
+        request = Request(
+            f"{self.proxy.url}/v1/reasoning-cache",
+            method="GET",
+            headers={
+                "Authorization": "Bearer sk-cursor-test",
+            },
+        )
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(payload["cache"]["total_rows"], 1)
+
 
 class InterleavedConversationTests(unittest.TestCase):
     def setUp(self) -> None:

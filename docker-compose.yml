@@ -1,0 +1,47 @@
+services:
+  deepseek-cursor-proxy:
+    build: .
+    container_name: deepseek-cursor-proxy
+    ports:
+      - "${PROXY_PORT:-9000}:9000"
+    volumes:
+      # Persistent storage for config and reasoning cache
+      - deepseek-config:/home/appuser/.deepseek-cursor-proxy
+    environment:
+      # Upstream DeepSeek API
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-pro}
+
+      # Proxy settings
+      - PROXY_HOST=0.0.0.0
+      - PROXY_PORT=9000
+      - PROXY_NGROK=false
+      - PROXY_VERBOSE=${PROXY_VERBOSE:-false}
+      - PROXY_CORS=${PROXY_CORS:-false}
+      - PROXY_REQUEST_TIMEOUT=${PROXY_REQUEST_TIMEOUT:-300}
+
+      # Reasoning settings
+      - DEEPSEEK_THINKING=${DEEPSEEK_THINKING:-enabled}
+      - DEEPSEEK_REASONING_EFFORT=${DEEPSEEK_REASONING_EFFORT:-high}
+      - MISSING_REASONING_STRATEGY=${MISSING_REASONING_STRATEGY:-reject}
+      - DISPLAY_REASONING=${DISPLAY_REASONING:-true}
+
+      # Cache limits
+      - REASONING_CACHE_MAX_AGE_SECONDS=${REASONING_CACHE_MAX_AGE_SECONDS:-604800}
+      - REASONING_CACHE_MAX_ROWS=${REASONING_CACHE_MAX_ROWS:-10000}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:9000/v1/healthz')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  deepseek-config:

@@ -78,6 +78,16 @@ class DeepSeekProxyHandler(BaseHTTPRequestHandler):
         if request_path in {"/models", "/v1/models"}:
             self._send_models()
             return
+        if request_path in {"/reasoning-cache", "/v1/reasoning-cache"}:
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "cache": self.reasoning_store.stats(),
+                    "diagnostic": self.reasoning_store.diagnostic_info(),
+                },
+            )
+            return
         self._send_json(404, {"error": {"message": "Not found"}})
 
     def do_POST(self) -> None:
@@ -153,10 +163,14 @@ class DeepSeekProxyHandler(BaseHTTPRequestHandler):
                 f"{PLACEHOLDER_REASONING_CONTENT} "
                 "[not sent upstream because missing_reasoning_strategy=reject]"
             )
+            cache_diag = self.reasoning_store.diagnostic_info()
             LOG.warning(
-                "rejected request path=%s status=409 reason=missing_reasoning_content count=%s",
+                "rejected request path=%s status=409 reason=missing_reasoning_content "
+                "count=%s cache_rows=%s cache_location=%s",
                 request_path,
                 prepared.missing_reasoning_messages,
+                cache_diag["rows"],
+                cache_diag["cache_location"],
             )
             self._send_json(
                 409,
@@ -167,13 +181,17 @@ class DeepSeekProxyHandler(BaseHTTPRequestHandler):
                             f"thinking-mode tool-call history on "
                             f"{prepared.missing_reasoning_messages} assistant "
                             "message(s). This usually means the chat has tool-call "
-                            "turns that were not captured by this proxy/cache. Start "
-                            "a new chat or retry from the original tool-call turn."
+                            "turns that were not captured by this proxy/cache. "
+                            f"Cache has {cache_diag['rows']} row(s) at "
+                            f"{cache_diag['cache_location']}. "
+                            "Start a new chat or retry from the original tool-call turn. "
+                            "Use `deepseek-cursor-proxy --reasoning-cache-stats` for details."
                         ),
                         "type": "missing_reasoning_content",
                         "code": "missing_reasoning_content",
                         "missing_reasoning_messages": prepared.missing_reasoning_messages,
                         "diagnostic_placeholder": diagnostic_placeholder,
+                        "cache_diagnostic": cache_diag,
                     }
                 },
             )
@@ -560,6 +578,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Clear the local reasoning_content SQLite cache and exit",
     )
+    parser.add_argument(
+        "--reasoning-cache-stats",
+        action="store_true",
+        help="Print reasoning cache statistics and exit",
+    )
     return parser
 
 
@@ -724,6 +747,47 @@ def warn_if_insecure_upstream(url: str) -> None:
     LOG.warning("upstream base_url uses plain HTTP; bearer tokens may be exposed")
 
 
+def log_reasoning_cache_stats(store: ReasoningStore) -> None:
+    """Log reasoning cache statistics at startup and after maintenance."""
+    try:
+        stats = store.stats()
+        rows = stats["total_rows"]
+        oldest = stats["oldest_age_seconds"]
+        newest = stats["newest_age_seconds"]
+        db_size = stats["db_file_size_bytes"]
+        max_rows = stats["max_rows"]
+        max_age = stats["max_age_seconds"]
+
+        age_info = ""
+        if rows > 0 and oldest is not None and newest is not None:
+            age_info = (
+                f" oldest={oldest:.0f}s newest={newest:.0f}s"
+            )
+        size_info = ""
+        if db_size is not None:
+            if db_size > 1024 * 1024:
+                size_info = f" dbfile={db_size / 1024 / 1024:.1f}MB"
+            elif db_size > 1024:
+                size_info = f" dbfile={db_size / 1024:.1f}KB"
+            else:
+                size_info = f" dbfile={db_size}B"
+        ttl_info = ""
+        if rows > 0 and max_rows:
+            pct = rows / max_rows * 100
+            ttl_info = f" util={pct:.0f}%/{max_rows}"
+        elif max_rows:
+            ttl_info = f" util=0%/{max_rows}"
+
+        max_age_h = f"{max_age // 3600}h" if max_age else "unlimited"
+
+        LOG.info(
+            "reasoning cache: %s rows%s%s%s max_age=%s",
+            rows, age_info, size_info, ttl_info, max_age_h,
+        )
+    except Exception:
+        LOG.debug("failed to collect reasoning cache stats", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -762,6 +826,19 @@ def main(argv: list[str] | None = None) -> int:
         max_age_seconds=config.reasoning_cache_max_age_seconds,
         max_rows=config.reasoning_cache_max_rows,
     )
+    if args.reasoning_cache_stats:
+        stats = store.stats()
+        print(f"Reasoning cache location: {store.reasoning_content_path}")
+        print(f"  Total rows: {stats['total_rows']}")
+        print(f"  Oldest entry: {stats['oldest_age_seconds']}s ago" if stats['oldest_age_seconds'] is not None else "  Oldest entry: N/A")
+        print(f"  Newest entry: {stats['newest_age_seconds']}s ago" if stats['newest_age_seconds'] is not None else "  Newest entry: N/A")
+        print(f"  Total keys data size: {stats['total_keys_size_bytes']} bytes")
+        if stats['db_file_size_bytes'] is not None:
+            print(f"  Database file size: {stats['db_file_size_bytes']} bytes")
+        print(f"  Max rows: {stats['max_rows']}")
+        print(f"  Max age: {stats['max_age_seconds']}s")
+        store.close()
+        return 0
     if args.clear_reasoning_cache:
         deleted = store.clear()
         LOG.info("cleared %s reasoning cache row(s)", deleted)
@@ -788,6 +865,9 @@ def main(argv: list[str] | None = None) -> int:
         config.missing_reasoning_strategy,
         config.reasoning_content_path,
     )
+    log_reasoning_cache_stats(store)
+    if config.verbose:
+        LOG.info("reasoning cache path=%s", store.reasoning_content_path)
     if config.missing_reasoning_strategy == "placeholder":
         LOG.warning(
             (

@@ -55,7 +55,13 @@ def default_reasoning_content_path() -> Path:
 
 def populate_default_config_file(config_path: Path) -> None:
     config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    config_path.parent.chmod(0o700)
+    try:
+        config_path.parent.chmod(0o700)
+    except OSError:
+        # Running in a container or restricted environment where we cannot
+        # chmod the parent directory; the mkdir above already set the mode
+        # as best it could.
+        pass
     config_path.write_text(DEFAULT_CONFIG_TEXT, encoding="utf-8")
     config_path.chmod(0o600)
 

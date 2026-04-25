@@ -119,6 +119,46 @@ On the first run, `deepseek-cursor-proxy` will create:
 - `~/.deepseek-cursor-proxy/config.yaml`: the configuration file
 - `~/.deepseek-cursor-proxy/reasoning_content.sqlite3`: the reasoning content cache
 
+### Docker Deployment (Alternative)
+
+For containerized deployment, use Docker Compose:
+
+```bash
+# Build and start the proxy
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Check cache statistics inside the container
+docker compose exec deepseek-cursor-proxy deepseek-cursor-proxy --reasoning-cache-stats
+
+# Stop the proxy
+docker compose down
+```
+
+The Docker setup uses persistent volumes for the configuration and reasoning cache,
+so your cached reasoning survives container restarts.
+
+Customize with a `.env` file:
+
+```bash
+# Create .env file with your settings
+cat > .env << EOF
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
+PROXY_VERBOSE=true
+MISSING_REASONING_STRATEGY=reject
+EOF
+
+# Start with custom .env
+docker compose up -d
+```
+
+The container runs as a non-root user (`appuser`) on port 9000 and includes a
+healthcheck on `/v1/healthz`. ngrok is disabled by default since the container
+mode targets local-API scenarios (e.g., Roo Code).
+
 ### Step 4: Chat with DeepSeek in Cursor
 
 Select `deepseek-v4-pro` in Cursor and use chat or agent mode as usual.
@@ -170,6 +210,77 @@ Clear the local reasoning cache:
 
 ```bash
 deepseek-cursor-proxy --clear-reasoning-cache
+```
+
+### Reasoning Cache Diagnostics
+
+When troubleshooting the `missing_reasoning_content` (409) error, the proxy provides
+several tools to inspect the reasoning cache:
+
+**CLI — Print cache statistics and exit:**
+
+```bash
+deepseek-cursor-proxy --reasoning-cache-stats
+```
+
+Example output:
+```
+Reasoning cache location: /home/user/.deepseek-cursor-proxy/reasoning_content.sqlite3
+  Total rows: 42
+  Oldest entry: 3600.0s ago
+  Newest entry: 10.0s ago
+  Total keys data size: 12345 bytes
+  Database file size: 81920 bytes
+  Max rows: 10000
+  Max age: 604800s
+```
+
+**HTTP — Query cache stats at runtime:**
+
+```bash
+curl http://127.0.0.1:9000/v1/reasoning-cache
+```
+
+Example response:
+```json
+{
+  "ok": true,
+  "cache": {
+    "total_rows": 42,
+    "oldest_age_seconds": 3600.0,
+    "newest_age_seconds": 10.0,
+    "db_file_size_bytes": 81920,
+    "max_rows": 10000,
+    "max_age_seconds": 604800
+  },
+  "diagnostic": {
+    "cache_location": "/home/user/.deepseek-cursor-proxy/reasoning_content.sqlite3",
+    "rows": 42,
+    "max_rows": "10000",
+    "max_age": "604800h"
+  }
+}
+```
+
+**Startup logging** — The proxy logs cache utilization on every start:
+```
+reasoning cache: 42 rows oldest=3600s newest=10s dbfile=80.0KB util=0%/10000 max_age=604800h
+```
+
+**Improved 409 error response** — The `missing_reasoning_content` error now includes
+a `cache_diagnostic` field with location and row count:
+```json
+{
+  "error": {
+    "message": "... Cache has 0 row(s) at :memory:. Use `deepseek-cursor-proxy --reasoning-cache-stats` for details.",
+    "cache_diagnostic": {
+      "cache_location": ":memory:",
+      "rows": 0,
+      "max_rows": "10000",
+      "max_age": "604800h"
+    }
+  }
+}
 ```
 
 Run tests:

@@ -1,0 +1,44 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Tests
+tests/
+
+# Pre-commit
+.pre-commit-config.yaml
+.ruff_cache/
+
+# Documentation (keep README.md for build metadata)
+*.md
+assets/
+plans/
+
+# Build artifacts
+dist/
+build/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml

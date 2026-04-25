@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from io import BytesIO
 import gzip
+import json
 import unittest
 import zlib
 
-from deepseek_cursor_proxy.server import read_response_body, summarize_chat_payload
+from deepseek_cursor_proxy.server import (
+    build_arg_parser,
+    main,
+    read_response_body,
+    summarize_chat_payload,
+)
 
 
 class FakeResponse:
@@ -46,6 +52,20 @@ class ServerTests(unittest.TestCase):
         self.assertIn("messages=1", summary)
         self.assertIn("tools=1", summary)
         self.assertNotIn("secret prompt", summary)
+
+    def test_build_arg_parser_accepts_reasoning_cache_stats(self) -> None:
+        parser = build_arg_parser()
+        args = parser.parse_args(["--reasoning-cache-stats"])
+        self.assertTrue(args.reasoning_cache_stats)
+        self.assertFalse(args.clear_reasoning_cache)
+
+    def test_build_arg_parser_accepts_config_path_and_cache_stats(self) -> None:
+        parser = build_arg_parser()
+        args = parser.parse_args(
+            ["--config", "/tmp/test.yaml", "--reasoning-cache-stats"]
+        )
+        self.assertTrue(args.reasoning_cache_stats)
+        self.assertEqual(str(args.config_path), "/tmp/test.yaml")
 
 
 if __name__ == "__main__":

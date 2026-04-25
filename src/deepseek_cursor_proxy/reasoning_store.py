@@ -8,6 +8,10 @@ import threading
 import time
 from typing import Any
 
+import logging
+
+LOG = logging.getLogger("deepseek_cursor_proxy")
+
 
 def normalize_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
     function = tool_call.get("function") or {}
@@ -77,7 +81,14 @@ def canonical_scope_message(message: dict[str, Any]) -> dict[str, Any]:
 
 
 def conversation_scope(messages: list[dict[str, Any]], namespace: str = "") -> str:
-    scope_messages = [canonical_scope_message(message) for message in messages]
+    # Exclude system messages from scope so that changing the system prompt
+    # (e.g., switching modes in Roo Code) does not invalidate cached
+    # reasoning_content for assistant messages with tool_calls.
+    scope_messages = [
+        canonical_scope_message(message)
+        for message in messages
+        if message.get("role") != "system"
+    ]
     payload: Any = scope_messages
     if namespace:
         payload = {"namespace": namespace, "messages": scope_messages}
@@ -107,6 +118,10 @@ class ReasoningStore:
         self._conn = sqlite3.connect(
             self.reasoning_content_path, check_same_thread=False
         )
+        # Enable WAL mode for better concurrent read/write performance
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        # Enable foreign keys and set a busy timeout to reduce SQLITE_BUSY errors
+        self._conn.execute("PRAGMA busy_timeout=5000")
         if isinstance(self.reasoning_content_path, Path):
             self.reasoning_content_path.chmod(0o600)
         self._conn.execute(
@@ -117,6 +132,13 @@ class ReasoningStore:
                 message_json TEXT NOT NULL,
                 created_at REAL NOT NULL
             )
+            """
+        )
+        # Create index on created_at for efficient pruning queries
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_reasoning_cache_created_at
+            ON reasoning_cache(created_at)
             """
         )
         self._conn.commit()
@@ -233,3 +255,61 @@ class ReasoningStore:
             )
             deleted += cursor.rowcount if cursor.rowcount != -1 else 0
         return deleted
+
+    def stats(self) -> dict[str, Any]:
+        """Return cache statistics for diagnostics and monitoring.
+
+        Returns:
+            dict with keys: total_rows, oldest_entry_seconds, newest_entry_seconds,
+            total_keys_size_bytes, db_file_size_bytes (or None for :memory:).
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*), COALESCE(MIN(created_at),0), "
+                "COALESCE(MAX(created_at),0), "
+                "COALESCE(SUM(LENGTH(key) + LENGTH(reasoning) + "
+                "LENGTH(message_json) + 8), 0) "
+                "FROM reasoning_cache"
+            ).fetchone()
+        count = int(row[0]) if row else 0
+        oldest = float(row[1]) if row else 0.0
+        newest = float(row[2]) if row else 0.0
+        data_size = int(row[3]) if row else 0
+
+        now = time.time()
+        result: dict[str, Any] = {
+            "total_rows": count,
+            "oldest_age_seconds": round(now - oldest, 1) if oldest > 0 else None,
+            "newest_age_seconds": round(now - newest, 1) if newest > 0 else None,
+            "total_keys_size_bytes": data_size,
+            "db_file_size_bytes": None,
+            "max_rows": self.max_rows,
+            "max_age_seconds": self.max_age_seconds,
+        }
+
+        if isinstance(self.reasoning_content_path, Path):
+            try:
+                result["db_file_size_bytes"] = self.reasoning_content_path.stat().st_size
+            except OSError:
+                pass
+
+        return result
+
+    def diagnostic_info(self) -> dict[str, Any]:
+        """Return concise diagnostic info for error messages and logging."""
+        max_rows_human = (
+            f"{self.max_rows}" if self.max_rows else "unlimited"
+        )
+        max_age_human = (
+            f"{self.max_age_seconds // 3600}h" if self.max_age_seconds else "unlimited"
+        )
+        return {
+            "cache_location": (
+                str(self.reasoning_content_path)
+                if isinstance(self.reasoning_content_path, Path)
+                else ":memory:"
+            ),
+            "rows": int(self.stats()["total_rows"]),
+            "max_rows": max_rows_human,
+            "max_age": max_age_human,
+        }

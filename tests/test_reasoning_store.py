@@ -65,6 +65,60 @@ class ReasoningStoreTests(unittest.TestCase):
         finally:
             store.close()
 
+    def test_stats_on_empty_store(self) -> None:
+        store = ReasoningStore(":memory:")
+        try:
+            stats = store.stats()
+            self.assertEqual(stats["total_rows"], 0)
+            self.assertIsNone(stats["oldest_age_seconds"])
+            self.assertIsNone(stats["newest_age_seconds"])
+            self.assertEqual(stats["total_keys_size_bytes"], 0)
+            self.assertIsNone(stats["db_file_size_bytes"])
+
+            diag = store.diagnostic_info()
+            self.assertEqual(diag["cache_location"], ":memory:")
+            self.assertEqual(diag["rows"], 0)
+        finally:
+            store.close()
+
+    def test_stats_on_populated_store(self) -> None:
+        store = ReasoningStore(":memory:", max_rows=5, max_age_seconds=3600)
+        try:
+            store.put("key1", "reasoning one", {"role": "assistant"})
+            store.put("key2", "reasoning two", {"role": "assistant"})
+
+            stats = store.stats()
+            self.assertEqual(stats["total_rows"], 2)
+            self.assertIsNotNone(stats["oldest_age_seconds"])
+            self.assertIsNotNone(stats["newest_age_seconds"])
+            self.assertGreater(stats["total_keys_size_bytes"], 0)
+            self.assertEqual(stats["max_rows"], 5)
+            self.assertEqual(stats["max_age_seconds"], 3600)
+
+            diag = store.diagnostic_info()
+            self.assertEqual(diag["rows"], 2)
+        finally:
+            store.close()
+
+    def test_stats_on_file_store_includes_file_size(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            reasoning_content_path = Path(temp_dir) / "reasoning.sqlite3"
+
+            store = ReasoningStore(reasoning_content_path)
+            try:
+                store.put("key_a", "reasoning a", {"role": "assistant"})
+                store.put("key_b", "reasoning b" * 100, {"role": "assistant"})
+
+                stats = store.stats()
+                self.assertEqual(stats["total_rows"], 2)
+                self.assertIsNotNone(stats["db_file_size_bytes"])
+                self.assertGreater(stats["db_file_size_bytes"], 0)
+
+                diag = store.diagnostic_info()
+                self.assertIn("reasoning.sqlite3", diag["cache_location"])
+            finally:
+                store.close()
+
 
 if __name__ == "__main__":
     unittest.main()
