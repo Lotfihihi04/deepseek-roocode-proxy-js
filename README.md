@@ -30,7 +30,7 @@ Provider returned error:
 
 ## Usage
 
-### Step 1: Set Up ngrok
+### Step 1: Set Up ngrok (optional) if localhost is supported
 
 Cursor blocks non-public API URLs such as `localhost`, so the proxy needs a public HTTPS URL. [ngrok](https://ngrok.com/) can expose the local proxy to Cursor without opening router ports. Alternatively, you may use [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/setup/).
 
@@ -89,7 +89,7 @@ deepseek-cursor-proxy
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install
-git clone https://github.com/yxlao/deepseek-cursor-proxy.git
+git clone https://github.com/SpeedyGX/deepseek-cursor-proxy
 cd deepseek-cursor-proxy
 uv sync
 source .venv/bin/activate
