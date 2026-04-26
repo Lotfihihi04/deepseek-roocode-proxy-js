@@ -74,7 +74,7 @@ Note: you can toggle the custom API on and off with:
 
 ```bash
 # Install (activate your Python environment first)
-git clone https://github.com/yxlao/deepseek-cursor-proxy.git
+git clone https://github.com/SpeedyGX/deepseek-cursor-proxy.git
 cd deepseek-cursor-proxy
 pip install -e .
 
@@ -89,7 +89,7 @@ deepseek-cursor-proxy
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install
-git clone https://github.com/SpeedyGX/deepseek-cursor-proxy
+git clone https://github.com/SpeedyGX/deepseek-cursor-proxy.git
 cd deepseek-cursor-proxy
 uv sync
 source .venv/bin/activate
