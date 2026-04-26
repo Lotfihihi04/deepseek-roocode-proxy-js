@@ -460,6 +460,11 @@ class DeepSeekProxyHandler(BaseHTTPRequestHandler):
                 break
 
         if not finalized:
+            if display_adapter is not None:
+                closing_chunk = display_adapter.flush_chunk(original_model)
+                if closing_chunk is not None:
+                    self.wfile.write(sse_data(closing_chunk))
+                    self.wfile.flush()
             if self.config.verbose:
                 log_json("model streaming assistant messages", accumulator.messages())
             stored = accumulator.store_reasoning(self.reasoning_store, scope)

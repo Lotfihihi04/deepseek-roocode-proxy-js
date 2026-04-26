@@ -220,6 +220,8 @@ def normalize_message(
         normalized["content"] = ""
     if normalized["role"] == "assistant" and isinstance(normalized.get("content"), str):
         normalized["content"] = strip_cursor_thinking_blocks(normalized["content"])
+        if not normalized["content"].strip():
+            normalized["content"] = ""
 
     if normalized.get("tool_calls"):
         normalized["tool_calls"] = [
