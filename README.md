@@ -36,7 +36,7 @@ Provider returned error:
 
 ```bash
 # Install (activate your Python environment first)
-git clone https://github.com/SpeedyGX/deepseek-cursor-proxy.git
+git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
 cd deepseek-cursor-proxy
 pip install -e .
 
@@ -51,7 +51,7 @@ deepseek-cursor-proxy
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install
-git clone https://github.com/SpeedyGX/deepseek-cursor-proxy.git
+git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
 cd deepseek-cursor-proxy
 uv sync
 source .venv/bin/activate
@@ -66,7 +66,7 @@ deepseek-cursor-proxy
 # Install
 conda create -n dcp python=3.10 -y
 conda activate dcp
-git clone https://github.com/yxlao/deepseek-cursor-proxy.git
+git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
 cd deepseek-cursor-proxy
 pip install -e .
 
