@@ -3,7 +3,6 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
 
 /**
  * Normalize a tool call object for canonical comparison.
@@ -89,7 +88,7 @@ function conversationScope(messages, namespace) {
 
 class ReasoningStore {
   /**
-   * @param {string} reasoningContentPath - Path to the SQLite file, or ':memory:'.
+   * @param {string} reasoningContentPath - Path to the JSON cache file, or ':memory:'.
    * @param {object} [options]
    * @param {number|null} [options.maxAgeSeconds]
    * @param {number|null} [options.maxRows]
@@ -98,8 +97,12 @@ class ReasoningStore {
     this.maxAgeSeconds = maxAgeSeconds;
     this.maxRows = maxRows;
     this.reasoningContentPath = reasoningContentPath;
+    this._inMemory = reasoningContentPath === ':memory:';
 
-    if (reasoningContentPath !== ':memory:') {
+    // In-memory store: Map<key, { reasoning, message_json, created_at }>
+    this._data = new Map();
+
+    if (!this._inMemory) {
       const dir = path.dirname(reasoningContentPath);
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       try {
@@ -107,65 +110,70 @@ class ReasoningStore {
       } catch (_e) {
         // ignore — may fail in containers
       }
+      this._load();
     }
-
-    this._db = new Database(reasoningContentPath);
-    this._db.pragma('journal_mode = WAL');
-    this._db.pragma('busy_timeout = 5000');
-
-    if (reasoningContentPath !== ':memory:') {
-      try {
-        fs.chmodSync(reasoningContentPath, 0o600);
-      } catch (_e) {
-        // best effort
-      }
-    }
-
-    this._db.exec(`
-      CREATE TABLE IF NOT EXISTS reasoning_cache (
-        key TEXT PRIMARY KEY,
-        reasoning TEXT NOT NULL,
-        message_json TEXT NOT NULL,
-        created_at REAL NOT NULL
-      )
-    `);
-    this._db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_reasoning_cache_created_at
-      ON reasoning_cache(created_at)
-    `);
-
-    this._stmtPut = this._db.prepare(`
-      INSERT INTO reasoning_cache(key, reasoning, message_json, created_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET
-        reasoning = excluded.reasoning,
-        message_json = excluded.message_json,
-        created_at = excluded.created_at
-    `);
-    this._stmtGet = this._db.prepare(
-      'SELECT reasoning FROM reasoning_cache WHERE key = ?',
-    );
-    this._stmtCount = this._db.prepare('SELECT COUNT(*) as cnt FROM reasoning_cache');
-    this._stmtDelete = this._db.prepare('DELETE FROM reasoning_cache');
 
     this.prune();
   }
 
+  /** Load the cache from disk, ignoring errors (treats as empty). */
+  _load() {
+    try {
+      const text = fs.readFileSync(this.reasoningContentPath, 'utf8');
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [key, entry] of Object.entries(parsed)) {
+          if (
+            entry &&
+            typeof entry.reasoning === 'string' &&
+            typeof entry.message_json === 'string' &&
+            typeof entry.created_at === 'number'
+          ) {
+            this._data.set(key, entry);
+          }
+        }
+      }
+    } catch (_e) {
+      // file doesn't exist or is corrupted; start fresh
+    }
+  }
+
+  /** Persist the cache to disk atomically (write temp file then rename). */
+  _save() {
+    if (this._inMemory) return;
+    const obj = Object.fromEntries(this._data);
+    const json = JSON.stringify(obj);
+    const tmpPath = this.reasoningContentPath + '.tmp';
+    try {
+      fs.writeFileSync(tmpPath, json, { encoding: 'utf8', mode: 0o600 });
+      try {
+        fs.chmodSync(tmpPath, 0o600);
+      } catch (_e) {
+        // best effort
+      }
+      fs.renameSync(tmpPath, this.reasoningContentPath);
+    } catch (_e) {
+      // best effort — clean up stray temp file
+      try { fs.unlinkSync(tmpPath); } catch (_e2) { /* ignore */ }
+    }
+  }
+
   close() {
-    this._db.close();
+    // No resources to release for the JSON store.
   }
 
   put(key, reasoning, message) {
     if (typeof reasoning !== 'string') return;
     const messageJson = JSON.stringify(message);
     const now = Date.now() / 1000;
-    this._stmtPut.run(key, reasoning, messageJson, now);
+    this._data.set(key, { reasoning, message_json: messageJson, created_at: now });
     this._pruneLocked();
+    this._save();
   }
 
   get(key) {
-    const row = this._stmtGet.get(key);
-    return row ? String(row.reasoning) : null;
+    const entry = this._data.get(key);
+    return entry ? String(entry.reasoning) : null;
   }
 
   storeAssistantMessage(message, scope) {
@@ -205,48 +213,50 @@ class ReasoningStore {
   }
 
   clear() {
-    const count = this._stmtCount.get().cnt;
-    this._stmtDelete.run();
+    const count = this._data.size;
+    this._data.clear();
+    this._save();
     return count;
   }
 
   prune() {
     this._pruneLocked();
+    this._save();
   }
 
   _pruneLocked() {
     if (this.maxAgeSeconds != null && this.maxAgeSeconds > 0) {
       const cutoff = Date.now() / 1000 - this.maxAgeSeconds;
-      this._db.prepare('DELETE FROM reasoning_cache WHERE created_at < ?').run(cutoff);
+      for (const [key, entry] of this._data) {
+        if (entry.created_at < cutoff) {
+          this._data.delete(key);
+        }
+      }
     }
-    if (this.maxRows != null && this.maxRows > 0) {
-      this._db.prepare(`
-        DELETE FROM reasoning_cache
-        WHERE key NOT IN (
-          SELECT key FROM reasoning_cache
-          ORDER BY created_at DESC
-          LIMIT ?
-        )
-      `).run(this.maxRows);
+    if (this.maxRows != null && this.maxRows > 0 && this._data.size > this.maxRows) {
+      const sorted = [...this._data.entries()]
+        .sort((a, b) => b[1].created_at - a[1].created_at);
+      this._data.clear();
+      for (const [k, v] of sorted.slice(0, this.maxRows)) {
+        this._data.set(k, v);
+      }
     }
   }
 
   stats() {
-    const row = this._db.prepare(
-      'SELECT COUNT(*) as cnt, COALESCE(MIN(created_at),0) as oldest, ' +
-      'COALESCE(MAX(created_at),0) as newest, ' +
-      'COALESCE(SUM(LENGTH(key) + LENGTH(reasoning) + LENGTH(message_json) + 8), 0) as data_size ' +
-      'FROM reasoning_cache',
-    ).get();
-
-    const count = Number(row.cnt);
-    const oldest = Number(row.oldest);
-    const newest = Number(row.newest);
-    const dataSize = Number(row.data_size);
+    let oldest = null;
+    let newest = null;
+    let dataSize = 0;
+    for (const [key, entry] of this._data) {
+      if (oldest === null || entry.created_at < oldest) oldest = entry.created_at;
+      if (newest === null || entry.created_at > newest) newest = entry.created_at;
+      dataSize += key.length + entry.reasoning.length + entry.message_json.length + 8;
+    }
+    const count = this._data.size;
     const now = Date.now() / 1000;
 
     let dbFileSize = null;
-    if (this.reasoningContentPath !== ':memory:') {
+    if (!this._inMemory) {
       try {
         dbFileSize = fs.statSync(this.reasoningContentPath).size;
       } catch (_e) {
@@ -256,8 +266,8 @@ class ReasoningStore {
 
     return {
       total_rows: count,
-      oldest_age_seconds: oldest > 0 ? Math.round((now - oldest) * 10) / 10 : null,
-      newest_age_seconds: newest > 0 ? Math.round((now - newest) * 10) / 10 : null,
+      oldest_age_seconds: oldest !== null ? Math.round((now - oldest) * 10) / 10 : null,
+      newest_age_seconds: newest !== null ? Math.round((now - newest) * 10) / 10 : null,
       total_keys_size_bytes: dataSize,
       db_file_size_bytes: dbFileSize,
       max_rows: this.maxRows,
@@ -272,9 +282,7 @@ class ReasoningStore {
       : 'unlimited';
     const stats = this.stats();
     return {
-      cache_location: this.reasoningContentPath === ':memory:'
-        ? ':memory:'
-        : this.reasoningContentPath,
+      cache_location: this._inMemory ? ':memory:' : this.reasoningContentPath,
       rows: stats.total_rows,
       max_rows: maxRowsHuman,
       max_age: maxAgeHuman,
