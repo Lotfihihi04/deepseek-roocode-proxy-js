@@ -1,6 +1,6 @@
-<h1><img src="assets/logo.png" width="90" alt="deepseek-cursor-proxy logo" style="vertical-align: middle;"> deepseek-roocode-proxy</h1>
+<h1><img src="assets/logo.png" width="90" alt="deepseek-roocode-proxy logo" style="vertical-align: middle;"> deepseek-roocode-proxy</h1>
 
-Compatibility proxy connecting RooCode and compatible editors to DeepSeek thinking models (`deepseek-v4-pro` and `deepseek-v4-flash`).
+Compatibility proxy connecting RooCode and compatible editors to DeepSeek thinking models (`deepseek-v4-pro` and `deepseek-v4-flash`). Built with **Node.js**.
 
 ## What It Does
 
@@ -28,55 +28,36 @@ Provider returned error:
 }
 ```
 
+## Requirements
+
+- **Node.js >= 18**
+- npm (comes with Node.js)
+
 ## Usage
 
 ### Step 1: Install and Start the Proxy Server
 
-**TL;DR Version**
-
 ```bash
-# Install (activate your Python environment first)
-git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
-cd deepseek-cursor-proxy
-pip install -e .
+# Clone the repo
+git clone https://github.com/Lotfihihi04/deepseek-roocode-proxy-js.git
+cd deepseek-roocode-proxy-js
 
-# Start
-deepseek-cursor-proxy
+# Install dependencies
+npm install
+
+# Start the proxy
+npm start
 ```
 
-**Full Instructions with UV**
+Or run directly:
 
 ```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install
-git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
-cd deepseek-cursor-proxy
-uv sync
-source .venv/bin/activate
-
-# Start
-deepseek-cursor-proxy
-```
-
-**Full Instructions with Conda**
-
-```bash
-# Install
-conda create -n dcp python=3.10 -y
-conda activate dcp
-git clone https://github.com/SpeedyGX/deepseek-roocode-proxy.git
-cd deepseek-cursor-proxy
-pip install -e .
-
-# Start
-deepseek-cursor-proxy
+node src/js/server.js
 ```
 
 On start, the proxy prints the local URL (`http://localhost:9000`) and, if ngrok is enabled, the ngrok public URL.
 
-On the first run, `deepseek-cursor-proxy` will create:
+On the first run, the proxy will create:
 
 - `~/.deepseek-cursor-proxy/config.yaml`: the configuration file
 - `~/.deepseek-cursor-proxy/reasoning_content.sqlite3`: the reasoning content cache
@@ -135,7 +116,7 @@ docker compose up -d
 docker compose logs -f
 
 # Check cache statistics inside the container
-docker compose exec deepseek-cursor-proxy deepseek-cursor-proxy --reasoning-cache-stats
+docker compose exec deepseek-cursor-proxy node src/js/server.js --reasoning-cache-stats
 
 # Stop the proxy
 docker compose down
@@ -147,7 +128,6 @@ so your cached reasoning survives container restarts.
 Customize with a `.env` file:
 
 ```bash
-# Create .env file with your settings
 cat > .env << EOF
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
@@ -155,7 +135,6 @@ PROXY_VERBOSE=true
 MISSING_REASONING_STRATEGY=reject
 EOF
 
-# Start with custom .env
 docker compose up -d
 ```
 
@@ -167,66 +146,59 @@ mode targets local-API scenarios (e.g., RooCode).
 
 DeepSeek's [thinking mode](https://api-docs.deepseek.com/guides/thinking_mode#tool-calls) requires `reasoning_content` from assistant messages in tool-call sequences to be passed back in later requests. Some AI editors may omit this field, causing DeepSeek to return a 400 error. This proxy sits between the editor and DeepSeek and repairs requests when it has the exact original reasoning cached.
 
-- Core fix: every DeepSeek response, streaming or non-streaming, has its `reasoning_content` stored in a local SQLite cache keyed by message signature, tool-call ID, and tool-call function signature. On outgoing thinking-mode requests, the proxy restores missing `reasoning_content` for tool-call-related assistant messages and sends the complete history to DeepSeek. If the cache is cold, such as after a proxy restart, it returns a local error instead of fabricating reasoning.
-- Multi-conversation isolation: cache keys are scoped by a SHA-256 hash of the canonical conversation prefix (roles, content, tool calls, excluding `reasoning_content`) plus the upstream model/configuration and an API-key hash. Concurrent or interleaved threads with different histories get different scopes, so reused tool-call IDs do not collide. Byte-identical cloned histories are indistinguishable unless the client sends a differentiating history.
-- DeepSeek [prefix caching](https://api-docs.deepseek.com/guides/kv_cache) compatibility: the proxy does not inject synthetic thread IDs, timestamps, or cache-control messages into the prompt. When it restores cached reasoning, it restores the exact original string, preserving repeated prefixes for DeepSeek's automatic best-effort context cache.
-- Additional compatibility fixes: the proxy converts legacy `functions`/`function_call` fields to `tools`/`tool_choice`, preserves required and named tool-choice semantics, normalizes `reasoning_effort` aliases per DeepSeek docs, strips mirrored `<think>` blocks from assistant content, converts multi-part content arrays to plain text, logs DeepSeek prompt-cache usage when available, and mirrors `reasoning_content` into client-visible `<think>...</think>` blocks for thinking display.
+- **Core fix**: every DeepSeek response, streaming or non-streaming, has its `reasoning_content` stored in a local SQLite cache keyed by message signature, tool-call ID, and tool-call function signature. On outgoing thinking-mode requests, the proxy restores missing `reasoning_content` for tool-call-related assistant messages. If the cache is cold (e.g. after a proxy restart), it returns a local 409 error instead of fabricating reasoning.
+- **Multi-conversation isolation**: cache keys are scoped by a SHA-256 hash of the canonical conversation prefix plus the upstream model/configuration and an API-key hash. Concurrent threads with different histories get different scopes.
+- **DeepSeek prefix caching** compatibility: the proxy restores the exact original reasoning string, preserving repeated prefixes for DeepSeek's automatic context cache.
+- **Additional fixes**: legacy `functions`/`function_call` → `tools`/`tool_choice` conversion, `reasoning_effort` alias normalization, `<think>` block stripping from assistant content, multi-part content array flattening, and `reasoning_content` mirroring into `<think>...</think>` blocks.
 
 ## Debugging
-
-Normal logs avoid request/response bodies but still print compact request and usage statistics. `rounds` is the number of user turns in the forwarded history, `reasoning` is the number and character size of `reasoning_content` fields sent to DeepSeek, and `cache=hit/miss` comes from DeepSeek's `usage.prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`.
 
 Run with verbose output:
 
 ```bash
-deepseek-cursor-proxy --verbose
+node src/js/server.js --verbose
 ```
 
 Run without ngrok for local curl testing:
 
 ```bash
-PROXY_NGROK=false deepseek-cursor-proxy --port 9000 --verbose
+PROXY_NGROK=false node src/js/server.js --port 9000 --verbose
 ```
 
-If the editor shows `missing_reasoning_content`, the current chat contains thinking-mode tool-call history whose original DeepSeek `reasoning_content` is not in the local cache. This commonly happens when continuing an older chat after a proxy restart, cache clear, or cache format/config change. The local 409 response includes a diagnostic placeholder so the cause is visible, but that placeholder is not forwarded to DeepSeek in the default safe mode. Start a new chat, or retry from the original tool-call turn while the proxy is running so it can capture the reasoning.
+If the editor shows `missing_reasoning_content` (409), the current chat has tool-call turns whose `reasoning_content` is not in the local cache. Start a new chat, or retry from the original tool-call turn while the proxy is running.
 
-For debugging an old history, you can opt into a non-compliant compatibility fallback:
+For debugging an old history, opt into a non-compliant compatibility fallback:
 
 ```bash
-deepseek-cursor-proxy --verbose --missing-reasoning-strategy placeholder
+node src/js/server.js --verbose --missing-reasoning-strategy placeholder
 ```
-
-This inserts a loud placeholder into missing `reasoning_content` fields and forwards the request. It may still be rejected by DeepSeek and should not be used for normal work.
 
 Use another config file:
 
 ```bash
-deepseek-cursor-proxy --config ./dev.config.yaml
+node src/js/server.js --config ./dev.config.yaml
 ```
 
 Clear the local reasoning cache:
 
 ```bash
-deepseek-cursor-proxy --clear-reasoning-cache
+node src/js/server.js --clear-reasoning-cache
 ```
 
 ### Reasoning Cache Diagnostics
 
-When troubleshooting the `missing_reasoning_content` (409) error, the proxy provides
-several tools to inspect the reasoning cache:
-
 **CLI — Print cache statistics and exit:**
 
 ```bash
-deepseek-cursor-proxy --reasoning-cache-stats
+node src/js/server.js --reasoning-cache-stats
 ```
 
 Example output:
 ```
 Reasoning cache location: /home/user/.deepseek-cursor-proxy/reasoning_content.sqlite3
   Total rows: 42
-  Oldest entry: 3600.0s ago
-  Newest entry: 10.0s ago
+  Oldest entry: 3600s ago
+  Newest entry: 10s ago
   Total keys data size: 12345 bytes
   Database file size: 81920 bytes
   Max rows: 10000
@@ -255,34 +227,36 @@ Example response:
     "cache_location": "/home/user/.deepseek-cursor-proxy/reasoning_content.sqlite3",
     "rows": 42,
     "max_rows": "10000",
-    "max_age": "604800h"
+    "max_age": "168h"
   }
 }
 ```
 
-**Startup logging** — The proxy logs cache utilization on every start:
-```
-reasoning cache: 42 rows oldest=3600s newest=10s dbfile=80.0KB util=0%/10000 max_age=604800h
-```
+## Configuration
 
-**Improved 409 error response** — The `missing_reasoning_content` error now includes
-a `cache_diagnostic` field with location and row count:
-```json
-{
-  "error": {
-    "message": "... Cache has 0 row(s) at :memory:. Use `deepseek-cursor-proxy --reasoning-cache-stats` for details.",
-    "cache_diagnostic": {
-      "cache_location": ":memory:",
-      "rows": 0,
-      "max_rows": "10000",
-      "max_age": "604800h"
-    }
-  }
-}
-```
+The proxy reads settings from (in order of precedence):
 
-Run tests:
+1. CLI flags (highest priority)
+2. Environment variables
+3. YAML config file (`~/.deepseek-cursor-proxy/config.yaml` by default)
+4. Built-in defaults
 
-```bash
-PYTHONPATH=src python -m unittest discover -s tests
-```
+Key environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | Upstream DeepSeek API URL |
+| `DEEPSEEK_MODEL` | `deepseek-v4-pro` | Fallback model |
+| `PROXY_HOST` | `127.0.0.1` | Bind host |
+| `PROXY_PORT` | `9000` | Bind port |
+| `PROXY_VERBOSE` | `false` | Enable verbose logging |
+| `PROXY_CORS` | `false` | Enable CORS headers |
+| `PROXY_NGROK` | `false` | Start ngrok tunnel |
+| `PROXY_REQUEST_TIMEOUT` | `300` | Upstream request timeout (seconds) |
+| `DEEPSEEK_THINKING` | `enabled` | Thinking mode (`enabled`/`disabled`/`pass-through`) |
+| `DEEPSEEK_REASONING_EFFORT` | `high` | Reasoning effort (`high`/`max`) |
+| `CURSOR_DISPLAY_REASONING` | `true` | Mirror reasoning into `<think>` content |
+| `MISSING_REASONING_STRATEGY` | `reject` | What to do on cache miss (`reject`/`placeholder`) |
+| `REASONING_CACHE_MAX_AGE_SECONDS` | `604800` | Cache TTL in seconds (7 days) |
+| `REASONING_CACHE_MAX_ROWS` | `10000` | Max rows in the reasoning cache |
+| `REASONING_CONTENT_PATH` | `~/.deepseek-cursor-proxy/reasoning_content.sqlite3` | SQLite cache path |

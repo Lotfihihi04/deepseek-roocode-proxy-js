@@ -24,7 +24,7 @@ services:
       - DEEPSEEK_THINKING=${DEEPSEEK_THINKING:-enabled}
       - DEEPSEEK_REASONING_EFFORT=${DEEPSEEK_REASONING_EFFORT:-high}
       - MISSING_REASONING_STRATEGY=${MISSING_REASONING_STRATEGY:-reject}
-      - DISPLAY_REASONING=${DISPLAY_REASONING:-true}
+      - CURSOR_DISPLAY_REASONING=${CURSOR_DISPLAY_REASONING:-true}
 
       # Cache limits
       - REASONING_CACHE_MAX_AGE_SECONDS=${REASONING_CACHE_MAX_AGE_SECONDS:-604800}
@@ -34,9 +34,9 @@ services:
       test:
         [
           "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:9000/v1/healthz')",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:9000/v1/healthz', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))",
         ]
       interval: 30s
       timeout: 10s

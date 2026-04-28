@@ -1,0 +1,30 @@
+{
+  "name": "deepseek-roocode-proxy",
+  "version": "1.0.0",
+  "description": "Local OpenAI-compatible proxy for RooCode and DeepSeek thinking models",
+  "main": "src/js/server.js",
+  "bin": {
+    "deepseek-roocode-proxy": "src/js/server.js"
+  },
+  "scripts": {
+    "start": "node src/js/server.js",
+    "test": "node --test tests/"
+  },
+  "keywords": [
+    "roocode",
+    "deepseek",
+    "proxy",
+    "llm",
+    "openai-compatible",
+    "reasoning"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "js-yaml": "^4.1.0",
+    "minimist": "^1.2.8"
+  }
+}

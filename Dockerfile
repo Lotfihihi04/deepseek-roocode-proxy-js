@@ -1,31 +1,29 @@
-# Stage 1: Build wheel
-FROM python:3.12-slim AS builder
+# Stage 1: Install dependencies
+FROM node:20-slim AS builder
 
-WORKDIR /build
+WORKDIR /app
 
-# Install build dependencies
-RUN pip install --no-cache-dir build
+# Copy package files
+COPY package*.json ./
 
-# Copy project files
-COPY pyproject.toml .
-COPY src/ src/
-
-# Build wheel
-RUN python -m build --wheel
+# Install production dependencies only
+RUN npm ci --omit=dev
 
 
 # Stage 2: Minimal runtime image
-FROM python:3.12-slim
+FROM node:20-slim
 
 # Create non-root user and pre-create config directory with correct ownership
 RUN adduser --disabled-password --gecos '' appuser && \
     mkdir -p /home/appuser/.deepseek-cursor-proxy && \
     chown appuser:appuser /home/appuser/.deepseek-cursor-proxy
 
-# Install the built wheel
-COPY --from=builder /build/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && \
-    rm -rf /tmp/*.whl /root/.cache
+WORKDIR /app
+
+# Copy installed modules and source
+COPY --from=builder /app/node_modules ./node_modules
+COPY package*.json ./
+COPY src/ src/
 
 # Switch to non-root user
 USER appuser
@@ -33,7 +31,6 @@ USER appuser
 # Default port
 EXPOSE 9000
 
-# Default command not using ngrok (works with RooCode which allows localhost)
-# Pass API key via Authorization header from Cursor
-ENTRYPOINT ["deepseek-cursor-proxy"]
+# Default command (ngrok disabled since RooCode supports localhost)
+ENTRYPOINT ["node", "src/js/server.js"]
 CMD ["--host", "0.0.0.0", "--port", "9000"]
