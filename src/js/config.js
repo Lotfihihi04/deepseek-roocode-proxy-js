@@ -7,7 +7,7 @@ const yaml = require('js-yaml');
 
 const APP_DIR_NAME = '.deepseek-cursor-proxy';
 const CONFIG_FILE_NAME = 'config.yaml';
-const REASONING_CONTENT_FILE_NAME = 'reasoning_content.sqlite3';
+const REASONING_CONTENT_FILE_NAME = 'reasoning_content.json';
 
 const DEFAULT_CONFIG_TEXT = `# This file was created automatically at ~/.deepseek-cursor-proxy/config.yaml.
 # API keys are read from the client's Authorization header and forwarded upstream.
@@ -28,7 +28,7 @@ request_timeout: 300
 max_request_body_bytes: 20971520
 cors: false
 
-reasoning_content_path: reasoning_content.sqlite3
+reasoning_content_path: reasoning_content.json
 missing_reasoning_strategy: reject
 reasoning_cache_max_age_seconds: 604800
 reasoning_cache_max_rows: 10000

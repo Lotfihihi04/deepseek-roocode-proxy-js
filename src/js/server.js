@@ -645,12 +645,12 @@ Options:
   --port <port>                      Bind port (default from config, PROXY_PORT, or 9000)
   --model <model>                    Fallback DeepSeek model (default: deepseek-v4-pro)
   --base-url <url>                   DeepSeek base URL (default: https://api.deepseek.com)
-  --reasoning-content-path <path>    SQLite reasoning cache path
+  --reasoning-content-path <path>    Reasoning cache file path
   --ngrok                            Start an ngrok tunnel and print the public base URL
   --verbose                          Log detailed request metadata and full payloads
   --no-cursor-display-reasoning      Do not mirror reasoning_content into <think> content
   --missing-reasoning-strategy       reject (default) or placeholder
-  --clear-reasoning-cache            Clear the local SQLite reasoning cache and exit
+  --clear-reasoning-cache            Clear the local reasoning cache and exit
   --reasoning-cache-stats            Print reasoning cache statistics and exit
   -h, --help                         Show this help
 
